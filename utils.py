@@ -9,6 +9,7 @@ import pickle
 import os
 import json
 import ast
+import re
 from model import subsequent_mask
 from pytorch_pretrained_bert import BertTokenizer
 
@@ -21,8 +22,7 @@ class Batch(object):
         if trg is not None:
             self.trg = trg[:, :-1]  #
             self.trg_y = trg[:, 1:]  # 后挪一个位置开始
-            self.trg_mask = \
-                self.make_std_mask(self.trg, pad)
+            self.trg_mask = self.make_std_mask(self.trg, pad) # 训练时的有效预测个数
             self.ntokens = (self.trg_y != pad).data.sum()
 
     @staticmethod
@@ -43,17 +43,17 @@ def run_epoch(data_iter, model, loss_compute, device):
     total_loss = 0
     tokens = 0
     for i, batch in enumerate(data_iter):
-        # print("i=",i,"batch=",batch)
+
         src = batch.src.to(device)
         trg = batch.trg.to(device)
         src_mask = batch.src_mask.to(device)
         trg_mask = batch.trg_mask.to(device)
         trg_y = batch.trg_y.to(device)
         ntokens = batch.ntokens.to(device)
-
+        # print(src)
         out = model.forward(src, trg, src_mask, trg_mask)
         loss = loss_compute(out, trg_y, ntokens)
-        # 必须加上.cpu().numpy() 否则报错floating point exception (core dumped)
+
         total_loss += loss.detach().cpu().numpy()
         total_tokens += ntokens.cpu().numpy()
         tokens += ntokens.cpu().numpy()
@@ -109,9 +109,9 @@ class NoamOpt(object):
                 min(step ** (-0.5), step * self.warmup ** (-1.5)))
 
 def get_std_opt(model):
-    return NoamOpt(model.src_embed[0].d_model, 1, 20,
+    return NoamOpt(model.src_embed[0].d_model, 1, 50,
                    torch.optim.Adam(model.parameters(), lr=0, betas=(0.9, 0.98), eps=1e-9))
-    # 400预热步数内线性增加学习速率 之后减小
+    # 50 预热步数内线性增加学习速率 之后减小
 
 ##正则化
 class LabelSmoothing(nn.Module):
@@ -197,31 +197,57 @@ class data_utils():
         for line in all_dict:
             co_list = []
             su_list = []
+            pattern = "[A-Z.]"
 
-            for word in line.get("nl").strip().split():
-                if 'N' in word:
-                    w = 'N'
+
+            ll = line.get("nl").strip()
+            ll = re.sub(pattern, lambda x: " " + x.group(0), ll) #解决峰驼
+            ll = re.sub(";", " ; ", ll) #保留；
+            for word in re.split(" |\(|\)|\{|\}|,|\n|\[|\]|\.",ll):
+                w=""
+                is_skip=False
+                for sub_words in self.tokenizer.tokenize(word):
+                    if "##" in sub_words:
+                        is_skip = True
+                        break
+                    if w.strip()=="":
+                        w=sub_words
+                if is_skip:
+                    w='[UNK]'
+                    su_list.append(w)
                 else:
-                    sub_words = self.tokenizer.tokenize(word.lower())
-                    w = sub_words[0]
-                word_count[w] = word_count.get(w, 0) + 1
-                su_list.append(w)
+                    if w.strip()!="":
+                        word_count[w] = word_count.get(w, 0) + 1
+                        su_list.append(w)
             su_list = ['[CLS]'] + su_list
             su.append(su_list)
 
-            for word in line.get("code").strip().split():
-                if 'N' in word:
-                    w = 'N'
+            ll = line.get("code").strip()
+            ll = re.sub(pattern, lambda x: " " + x.group(0), ll)  # 解决峰驼
+            ll = re.sub(";", " ; ", ll)  # 保留；
+            for word in re.split(" |\(|\)|\{|\}|,|\n|\[|\]|\.",ll):
+                w = ""
+                is_skip = False
+                for sub_words in self.tokenizer.tokenize(word):
+                    if "##" in sub_words:
+                        is_skip = True
+                        break
+                    if w.strip() == "":
+                        w = sub_words
+                if is_skip:
+                    w = '[UNK]'
+                    co_list.append(w)
                 else:
-                    sub_words = self.tokenizer.tokenize(word.lower())
-                    w = sub_words[0]
-                word_count[w] = word_count.get(w, 0) + 1
-                co_list.append(w)
+
+                    if w.strip() != "":
+
+                        word_count[w] = word_count.get(w, 0) + 1
+                        co_list.append(w)
             co_list = ['[CLS]'] + co_list
             co.append(co_list)
 
         for w in word_count:
-            if word_count[w] > 1:
+            if word_count[w] >= 1:
                 self.new_vocab[w] = len(self.new_vocab)
 
         for d in co:
@@ -231,10 +257,10 @@ class data_utils():
                     word_list.append(self.new_vocab[w])
                 else:
                     word_list.append(self.unk_id)
-            if( len(word_list)<60 ):
-                word_list = list(word_list + [0] * (60 - len(word_list)))
+            if( len(word_list)<self.seq_length ):
+                word_list = list(word_list + [0] * (self.seq_length - len(word_list)))
             else:
-                word_list=word_list[:60]
+                word_list=word_list[:self.seq_length]
             # print(word_list)
             self.training_data_code.append(word_list)
 
@@ -245,10 +271,10 @@ class data_utils():
                     word_list.append(self.new_vocab[w])
                 else:
                     word_list.append(self.unk_id)
-            if (len(word_list) < 60):
-                word_list = list(word_list + [0] * (60 - len(word_list)))
+            if (len(word_list) < self.seq_length):
+                word_list = list(word_list + [0] * (self.seq_length - len(word_list)))
             else:
-                word_list = word_list[:60]
+                word_list = word_list[:self.seq_length]
             self.training_data_summary.append(word_list)
 
         write_json(self.dict_path, self.new_vocab)
@@ -272,27 +298,38 @@ class data_utils():
         out[mask] = np.concatenate(v)
         return out
 
-    def text2id(self, text, seq_length=60):
-        vec = np.zeros([seq_length] ,dtype=np.int32)
+    def text2id(self, text):
+        vec = np.zeros([self.seq_length] ,dtype=np.int32)
         unknown = 0.
-
+        pattern = "[A-Z.]"
         w_list = []
-        for word in text.strip().split():
-            if 'N' in word:
-                w = 'N'
-            else:
-                sub_words = self.tokenizer.tokenize(word)
-                w = sub_words[0]
+
+        ll = text.strip()
+        ll = re.sub(pattern, lambda x: " " + x.group(0), ll)  # 解决峰驼
+        ll = re.sub(";", " ; ", ll)  # 保留；
+        for word in re.split(" |\(|\)|\{|\}|,|\n|\[|\]|\.", ll):
+
+            w = ""
+            is_skip = False
+            for sub_words in self.tokenizer.tokenize(word):
+                if "##" in sub_words:
+                    is_skip = True
+                    break
+                if w.strip() == "":
+                    w = sub_words
+            if is_skip:
+                w = '[UNK]'
             if w in self.new_vocab:
                 w_list.append(self.new_vocab[w])
             else:
                 w_list.append(self.unk_id)
+
         w_list = [self.new_vocab['[CLS]']] + w_list
         indexed_tokens = w_list
-        assert len(text.strip().split())+1 == len(indexed_tokens)
+        # assert len(text.strip().split())+1 == len(indexed_tokens)
 
         for i,word in enumerate(indexed_tokens):
-            if i >= seq_length:
+            if i >= self.seq_length:
                 break
             vec[i] = word
         return vec
@@ -303,17 +340,8 @@ class data_utils():
         for w in indices:
             if w != self.eos_id:
                 sent.append(self.index2word[w])
-
+                # print(sent)
         return ' '.join(sent)
-## 数据生成
-def data_gen(V, batch, nbatches): #范围1-V的数字 每组batch个数据 共nbatches个Batch
-    "Generate random data for a src-tgt copy task."
-    for i in range(nbatches):
-        data = torch.from_numpy(np.random.randint(1, V, size=(batch, 10))).long()
-        data[:, 0] = 1
-        src = Variable(data, requires_grad=False)
-        tgt = Variable(data, requires_grad=False)
-        yield Batch(src, tgt, 0)
 
 ##简单loss计算
 class SimpleLossCompute(object):
@@ -332,6 +360,7 @@ class SimpleLossCompute(object):
             self.opt.step()
             self.opt.optimizer.zero_grad()
         return loss * norm.float()
+        # return (loss * norm).item()
 
 #贪心解码
 def greedy_decode(model, src, src_mask, max_len, start_symbol):

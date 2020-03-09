@@ -5,9 +5,11 @@ from solver import Solver
 def parse():
     parser = argparse.ArgumentParser(description="mytransformer")
     parser.add_argument('-model_dir', default='train_model', help='output model weight dir')
-    parser.add_argument('-seq_length', type=int, default=60, help='sequence length')
-    parser.add_argument('-batch_size', type=int, default=32, help='batch size')
-    parser.add_argument('-num_step', type=int, default=10, help='sequence length')
+
+    parser.add_argument('-seq_length', type=int, default=100, help='sequence length')
+    parser.add_argument('-batch_size', type=int, default=64, help='batch size')
+    parser.add_argument('-num_step', type=int, default=300, help='sequence length')
+
     parser.add_argument('-data_dir', default='data_dir', help='data dir')
     parser.add_argument('-load', action='store_true', help='load pretrained model')
     parser.add_argument('-train', action='store_true', help='whether train the model')

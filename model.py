@@ -4,7 +4,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math, copy, time
 from torch.autograd import Variable
-from torch.nn import CrossEntropyLoss
 import pdb
 import pickle
 
@@ -49,7 +48,7 @@ def clones(module, N):
 class Encoder(nn.Module):
     """N层堆叠的Encoder"""
 
-    def __init__(self, layer, N ,d_model, vocab_size):
+    def __init__(self, layer, N,d_model, vocab_size):
         super(Encoder, self).__init__()
         self.layers = clones(layer, N)
         self.norm = LayerNorm(layer.size)
@@ -60,12 +59,12 @@ class Encoder(nn.Module):
         break_probs = []
         group_prob = 0.
         for layer in self.layers:
+
             x, group_prob, break_prob = layer(x, mask, group_prob)
             break_probs.append(break_prob)
-        self.norm(x)
+        x=self.norm(x)
         break_probs = torch.stack(break_probs, dim=1)
         return self.proj(x), break_probs
-
 
 class LayerNorm(nn.Module):
     """构造一个layernorm模块"""
@@ -99,7 +98,7 @@ class SublayerConnection(nn.Module):
 class EncoderLayer(nn.Module):
     """Encoder分为两层Self-Attn和Feed Forward"""
 
-    def __init__(self, size, self_attn, feed_forward ,group_attn, dropout):
+    def __init__(self, size, self_attn, feed_forward,group_attn, dropout):
         super(EncoderLayer, self).__init__()
         self.self_attn = self_attn
         self.feed_forward = feed_forward
@@ -110,16 +109,9 @@ class EncoderLayer(nn.Module):
     def forward(self, x, mask,group_prob):
         "Self-Attn和Feed Forward"
         group_prob, break_prob = self.group_attn(x, mask, group_prob)
-        x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x,group_prob, mask))
+        x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, group_prob,mask))
         return self.sublayer[1](x, self.feed_forward), group_prob, break_prob
 
-    def masked_lm_loss(self, out, y):
-        fn = CrossEntropyLoss(ignore_index=-1)
-        return fn(out.view(-1, out.size()[-1]), y.view(-1))
-
-
-    def next_sentence_loss(self):
-        pass
 
 # Decoder部分
 class Decoder(nn.Module):
@@ -166,21 +158,22 @@ def subsequent_mask(size):
 
 
 # Attention
-def attention(query, key, value, mask=None, dropout=None, group_prob=None):
-    "Compute 'Scaled Dot Product Attention'"
+def attention(query, key, value, mask=None, dropout=None,group_prob=None):
+    "计算Attention即点乘V"
     d_k = query.size(-1)
+    # [B, h, L, L]
     scores = torch.matmul(query, key.transpose(-2, -1)) \
              / math.sqrt(d_k)
     if mask is not None:
-        seq_len=query.size()[-2]
-        # b = torch.from_numpy(np.diag(np.ones(seq_len, dtype=np.int32),0)).cuda()
-        b = torch.from_numpy(np.diag(np.ones(seq_len, dtype=np.int32), 0))
-        scores = scores.masked_fill((mask|b) == 0, -1e9)
+        seq_len = query.size()[-2]
+        b = torch.from_numpy(np.diag(np.ones(seq_len, dtype=np.int32), 0)).cuda()
+        scores = scores.masked_fill((mask | b) == 0, -1e9)
+
     if group_prob is not None:
-        p_attn = F.softmax(scores, dim = -1)
-        p_attn = p_attn*group_prob.unsqueeze(1)
+        p_attn = F.softmax(scores, dim=-1)
+        p_attn = p_attn * group_prob.unsqueeze(1)
     else:
-        p_attn = F.softmax(scores, dim = -1)
+        p_attn = F.softmax(scores, dim=-1)
     if dropout is not None:
         p_attn = dropout(p_attn)
     return torch.matmul(p_attn, value), p_attn
@@ -197,25 +190,28 @@ class MultiHeadedAttention(nn.Module):
         self.attn = None
         self.dropout = nn.Dropout(p=dropout)
 
-    def forward(self, query, key, value, group_prob=None, mask=None):
+    def forward(self, query, key, value, group_prob=None,mask=None):
+        """
+        实现MultiHeadedAttention。
+           输入的q，k，v是形状 [batch, L, d_model]。
+           输出的x 的形状同上。
+        """
         if mask is not None:
             # Same mask applied to all h heads.
             mask = mask.unsqueeze(1)
         nbatches = query.size(0)
 
-        # 1) Do all the linear projections in batch from d_model => h x d_k
-        # query,key,value shape: (nbatches, h, seq_len, d_k)
+        # 1) 这一步qkv变化:[batch, L, d_model] ->[batch, h, L, d_model/h]
         query, key, value = \
             [l(x).view(nbatches, -1, self.h, self.d_k).transpose(1, 2)
              for l, x in zip(self.linears, (query, key, value))]
 
-        # 2) Apply attention on all the projected vectors in batch.
-        x, self.attn = attention(query, key, value, mask=mask,
-                                 dropout=self.dropout, group_prob=group_prob)
-
-        # 3) "Concat" using a view and apply a final linear.
-        x = x.transpose(1, 2).contiguous() \
-            .view(nbatches, -1, self.h * self.d_k)
+        # 2) 计算注意力attn 得到attn*v 与attn
+        # qkv :[batch, h, L, d_model/h] -->x:[b, h, L, d_model/h], attn[b, h, L, L]
+        x, self.attn = attention(query, key, value, mask=mask, dropout=self.dropout,group_prob=group_prob)
+        # 3) 上一步的结果合并在一起还原成原始输入序列的形状
+        x = x.transpose(1, 2).contiguous().view(nbatches, -1, self.h * self.d_k)
+        # 最后再过一个线性层
         return self.linears[-1](x)
 
 
@@ -234,17 +230,14 @@ class GroupAttention(nn.Module):
 
         context = self.norm(context)
 
-        # a = torch.from_numpy(np.diag(np.ones(seq_len - 1, dtype=np.int32),1)).cuda()
-        # b = torch.from_numpy(np.diag(np.ones(seq_len, dtype=np.int32),0)).cuda()
-        # c = torch.from_numpy(np.diag(np.ones(seq_len - 1, dtype=np.int32),-1)).cuda()
-        # tri_matrix = torch.from_numpy(np.triu(np.ones([seq_len,seq_len], dtype=np.float32),0)).cuda()
+        a = torch.from_numpy(np.diag(np.ones(seq_len - 1, dtype=np.int32), 1)).cuda()
+        b = torch.from_numpy(np.diag(np.ones(seq_len, dtype=np.int32), 0)).cuda()
+        c = torch.from_numpy(np.diag(np.ones(seq_len - 1, dtype=np.int32), -1)).cuda()
+        tri_matrix = torch.from_numpy(np.triu(np.ones([seq_len, seq_len], dtype=np.float32), 0)).cuda()
 
-        a = torch.from_numpy(np.diag(np.ones(seq_len - 1, dtype=np.int32), 1))
-        b = torch.from_numpy(np.diag(np.ones(seq_len, dtype=np.int32), 0))
-        c = torch.from_numpy(np.diag(np.ones(seq_len - 1, dtype=np.int32), -1))
-        tri_matrix = torch.from_numpy(np.triu(np.ones([seq_len, seq_len], dtype=np.float32), 0))
         # mask = eos_mask & (a+c) | b
-        mask = bool(eos_mask) & (a + c)
+
+        mask = eos_mask & (a + c)
 
         key = self.linear_key(context)
         query = self.linear_query(context)
@@ -261,14 +254,6 @@ class GroupAttention(nn.Module):
         g_attn = g_attn + g_attn.transpose(-2, -1) + neibor_attn.masked_fill(b == 0, 1e-9)
 
         return g_attn, neibor_attn
-
-def gelu(x):
-    """Implementation of the gelu activation function.
-        For information: OpenAI GPT's gelu is slightly different (and gives slightly different results):
-        0.5 * x * (1 + torch.tanh(math.sqrt(2 / math.pi) * (x + 0.044715 * torch.pow(x, 3))))
-        Also see https://arxiv.org/abs/1606.08415
-    """
-    return x * 0.5 * (1.0 + torch.erf(x / math.sqrt(2.0)))
 
 # Position-wise Feed-Forward Networks
 class PositionwiseFeedForward(nn.Module):
@@ -317,7 +302,13 @@ class PositionalEncoding(nn.Module):
         x = x + Variable(self.pe[:, :x.size(1)], requires_grad=False)
         return self.dropout(x)
 
-
+def gelu(x):
+    """Implementation of the gelu activation function.
+        For information: OpenAI GPT's gelu is slightly different (and gives slightly different results):
+        0.5 * x * (1 + torch.tanh(math.sqrt(2 / math.pi) * (x + 0.044715 * torch.pow(x, 3))))
+        Also see https://arxiv.org/abs/1606.08415
+    """
+    return x * 0.5 * (1.0 + torch.erf(x / math.sqrt(2.0)))
 # 定义一个接受超参数并生成完整模型的函数
 def make_model(src_vocab, tgt_vocab, N=6, d_model=512, d_ff=2048, h=8, dropout=0.1):
     "根据输入的超参数构建一个模型"
