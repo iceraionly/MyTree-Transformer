@@ -80,7 +80,8 @@ class Solver():
         print(src)
         print(self.data_utils.id2sent(self.data_utils.text2id(x.get("code").strip())))
         src_mask = Variable(torch.ones(1, 1, self.args.seq_length)).cuda()  # 一个 一行60列的矩阵
-        res = greedy_decode(self.model.cuda(), src, src_mask, max_len=self.args.seq_length, start_symbol=1)#max_len为输出的语句长度
+        res = greedy_decode(self.model.cuda(), src, src_mask, max_len=self.args.seq_length,
+                            start_symbol=3)#max_len为输出的语句长度
         print(res)
         res_text=self.data_utils.id2sent(np.squeeze(res.cpu().numpy()))
         print(res_text)

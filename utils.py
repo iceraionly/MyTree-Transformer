@@ -51,7 +51,7 @@ def run_epoch(data_iter, model, loss_compute, device):
         trg_y = batch.trg_y.to(device)
         ntokens = batch.ntokens.to(device)
         # print(src)
-        out = model.forward(src, trg, src_mask, trg_mask)
+        out= model.forward(src, trg, src_mask, trg_mask)
         loss = loss_compute(out, trg_y, ntokens)
 
         total_loss += loss.detach().cpu().numpy()

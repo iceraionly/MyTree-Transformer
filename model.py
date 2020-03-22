@@ -52,19 +52,18 @@ class Encoder(nn.Module):
         super(Encoder, self).__init__()
         self.layers = clones(layer, N)
         self.norm = LayerNorm(layer.size)
-        self.proj = nn.Linear(d_model, vocab_size)
+        # self.proj = nn.Linear(d_model, vocab_size)
 
     def forward(self, x, mask):
         "每层layer依次通过输入序列与mask"
         break_probs = []
-        group_prob = 0.
+        group_prob = 0
         for layer in self.layers:
-
-            x, group_prob, break_prob = layer(x, mask, group_prob)
-            break_probs.append(break_prob)
-        x=self.norm(x)
-        break_probs = torch.stack(break_probs, dim=1)
-        return self.proj(x), break_probs
+            x, group_prob = layer(x, mask, group_prob)
+            # break_probs.append(break_prob)
+        x = self.norm(x)
+        # break_probs = torch.stack(break_probs, dim=1)
+        return x
 
 class LayerNorm(nn.Module):
     """构造一个layernorm模块"""
@@ -108,9 +107,9 @@ class EncoderLayer(nn.Module):
 
     def forward(self, x, mask,group_prob):
         "Self-Attn和Feed Forward"
-        group_prob, break_prob = self.group_attn(x, mask, group_prob)
+        group_prob= self.group_attn(x, mask, group_prob)
         x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, group_prob,mask))
-        return self.sublayer[1](x, self.feed_forward), group_prob, break_prob
+        return self.sublayer[1](x, self.feed_forward), group_prob
 
 
 # Decoder部分
@@ -160,6 +159,7 @@ def subsequent_mask(size):
 # Attention
 def attention(query, key, value, mask=None, dropout=None,group_prob=None):
     "计算Attention即点乘V"
+    # print("attention!!!!")
     d_k = query.size(-1)
     # [B, h, L, L]
     scores = torch.matmul(query, key.transpose(-2, -1)) \
@@ -167,11 +167,12 @@ def attention(query, key, value, mask=None, dropout=None,group_prob=None):
     if mask is not None:
         seq_len = query.size()[-2]
         b = torch.from_numpy(np.diag(np.ones(seq_len, dtype=np.int32), 0)).cuda()
-        scores = scores.masked_fill((mask | b) == 0, -1e9)
+        scores = scores.masked_fill((mask | b.bool()) == 0, -1e9)
 
     if group_prob is not None:
         p_attn = F.softmax(scores, dim=-1)
-        p_attn = p_attn * group_prob.unsqueeze(1)
+        p_attn = p_attn * group_prob.unsqueeze(1).float()
+        # print("CCCCCCCCCCCC")
     else:
         p_attn = F.softmax(scores, dim=-1)
     if dropout is not None:
@@ -226,8 +227,8 @@ class GroupAttention(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, context, eos_mask, prior):
-        batch_size, seq_len = context.size()[:2]
 
+        batch_size, seq_len = context.size()[:2]
         context = self.norm(context)
 
         a = torch.from_numpy(np.diag(np.ones(seq_len - 1, dtype=np.int32), 1)).cuda()
@@ -237,12 +238,12 @@ class GroupAttention(nn.Module):
 
         # mask = eos_mask & (a+c) | b
 
-        mask = eos_mask & (a + c)
+        mask = eos_mask & (a+c)
 
         key = self.linear_key(context)
         query = self.linear_query(context)
 
-        scores = torch.matmul(query, key.transpose(-2, -1)) / self.d_model
+        scores = torch.matmul(query, key.transpose(-2, -1)) / self.d_model   #Q·K转置/d
 
         scores = scores.masked_fill(mask == 0, -1e9)
         neibor_attn = F.softmax(scores, dim=-1)
@@ -252,8 +253,8 @@ class GroupAttention(nn.Module):
         t = torch.log(neibor_attn + 1e-9).masked_fill(a == 0, 0).matmul(tri_matrix)
         g_attn = tri_matrix.matmul(t).exp().masked_fill((tri_matrix.int() - b) == 0, 0)
         g_attn = g_attn + g_attn.transpose(-2, -1) + neibor_attn.masked_fill(b == 0, 1e-9)
-
-        return g_attn, neibor_attn
+        return g_attn
+        # return g_attn, neibor_attn   #C先验矩阵 每层的a序列
 
 # Position-wise Feed-Forward Networks
 class PositionwiseFeedForward(nn.Module):
@@ -319,7 +320,7 @@ def make_model(src_vocab, tgt_vocab, N=6, d_model=512, d_ff=2048, h=8, dropout=0
 
     position = PositionalEncoding(d_model, dropout)
     model = EncoderDecoder(
-        Encoder(EncoderLayer(d_model, c(attn), c(ff), group_attn,dropout), N,d_model, src_vocab),
+        Encoder(EncoderLayer(d_model, c(attn), c(ff), group_attn,dropout), N,d_model,src_vocab),
         Decoder(DecoderLayer(d_model, c(attn), c(attn),
                              c(ff), dropout), N),
         nn.Sequential(Embeddings(d_model, src_vocab), c(position)),
