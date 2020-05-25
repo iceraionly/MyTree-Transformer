@@ -56,9 +56,10 @@ class Encoder(nn.Module):
 
     def forward(self, x, mask):
         "每层layer依次通过输入序列与mask"
-        break_probs = []
+        # break_probs = []
         group_prob = 0
         for layer in self.layers:
+            # x, group_prob = layer(x, mask, group_prob)
             x, group_prob = layer(x, mask, group_prob)
             # break_probs.append(break_prob)
         x = self.norm(x)
@@ -107,7 +108,7 @@ class EncoderLayer(nn.Module):
 
     def forward(self, x, mask,group_prob):
         "Self-Attn和Feed Forward"
-        group_prob= self.group_attn(x, mask, group_prob)
+        group_prob = self.group_attn(x, mask, group_prob)
         x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, group_prob,mask))
         return self.sublayer[1](x, self.feed_forward), group_prob
 
@@ -166,7 +167,8 @@ def attention(query, key, value, mask=None, dropout=None,group_prob=None):
              / math.sqrt(d_k)
     if mask is not None:
         seq_len = query.size()[-2]
-        b = torch.from_numpy(np.diag(np.ones(seq_len, dtype=np.int32), 0)).cuda()
+        # b = torch.from_numpy(np.diag(np.ones(seq_len, dtype=np.int32), 0)).cuda()
+        b = torch.from_numpy(np.diag(np.ones(seq_len, dtype=np.int32), 0))
         scores = scores.masked_fill((mask | b.bool()) == 0, -1e9)
 
     if group_prob is not None:
@@ -231,14 +233,18 @@ class GroupAttention(nn.Module):
         batch_size, seq_len = context.size()[:2]
         context = self.norm(context)
 
-        a = torch.from_numpy(np.diag(np.ones(seq_len - 1, dtype=np.int32), 1)).cuda()
-        b = torch.from_numpy(np.diag(np.ones(seq_len, dtype=np.int32), 0)).cuda()
-        c = torch.from_numpy(np.diag(np.ones(seq_len - 1, dtype=np.int32), -1)).cuda()
-        tri_matrix = torch.from_numpy(np.triu(np.ones([seq_len, seq_len], dtype=np.float32), 0)).cuda()
+        # a = torch.from_numpy(np.diag(np.ones(seq_len - 1, dtype=np.int32), 1)).cuda()
+        # b = torch.from_numpy(np.diag(np.ones(seq_len, dtype=np.int32), 0)).cuda()
+        # c = torch.from_numpy(np.diag(np.ones(seq_len - 1, dtype=np.int32), -1)).cuda()
+        # tri_matrix = torch.from_numpy(np.triu(np.ones([seq_len, seq_len], dtype=np.float32), 0)).cuda()
 
         # mask = eos_mask & (a+c) | b
+        a = torch.from_numpy(np.diag(np.ones(seq_len - 1, dtype=np.int32), 1))
+        b = torch.from_numpy(np.diag(np.ones(seq_len, dtype=np.int32), 0))
+        c = torch.from_numpy(np.diag(np.ones(seq_len - 1, dtype=np.int32), -1))
+        tri_matrix = torch.from_numpy(np.triu(np.ones([seq_len, seq_len], dtype=np.float32), 0))
 
-        mask = eos_mask & (a+c)
+        mask = eos_mask & (a + c).bool()
 
         key = self.linear_key(context)
         query = self.linear_query(context)

@@ -72,20 +72,20 @@ class Solver():
             all_dict.append(ast.literal_eval(i))
         print("ok")
 
-        self.model.eval()
-        x=all_dict[25]
-        print(x.get("code").strip())
-        src = Variable(torch.from_numpy(np.expand_dims(self.data_utils.text2id(x.get("code").strip()),
-                                                           axis=0)).long()).cuda()
-        print(src)
-        print(self.data_utils.id2sent(self.data_utils.text2id(x.get("code").strip())))
-        src_mask = Variable(torch.ones(1, 1, self.args.seq_length)).cuda()  # 一个 一行60列的矩阵
-        res = greedy_decode(self.model.cuda(), src, src_mask, max_len=self.args.seq_length,
-                            start_symbol=3)#max_len为输出的语句长度
-        print(res)
-        res_text=self.data_utils.id2sent(np.squeeze(res.cpu().numpy()))
-        print(res_text)
-        print(x.get("nl").strip())
+        # self.model.eval()
+        # x=all_dict[25]
+        # print(x.get("code").strip())
+        # src = Variable(torch.from_numpy(np.expand_dims(self.data_utils.text2id(x.get("code").strip()),
+        #                                                    axis=0)).long())
+        # print(src)
+        # print(self.data_utils.id2sent(self.data_utils.text2id(x.get("code").strip())))
+        # src_mask = Variable(torch.ones(1, 1, self.args.seq_length)) # 一个 一行60列的矩阵
+        # res = greedy_decode(self.model, src, src_mask, max_len=self.args.seq_length,
+        #                     start_symbol=3)#max_len为输出的语句长度
+        # print(res)
+        # res_text=self.data_utils.id2sent(np.squeeze(res.cpu().numpy()))
+        # print(res_text)
+        # print(x.get("nl").strip())
 
 
         # self.model.eval()
@@ -95,8 +95,8 @@ class Solver():
         #
         #
         #     src = Variable(torch.from_numpy(np.expand_dims(self.data_utils.text2id(x.get("code").strip()),
-        #                                                    axis=0)).long()).cuda()
-        #     src_mask = Variable(torch.ones(1, 1, self.args.seq_length)).cuda() #一个 一行60列的矩阵
+        #                                                    axis=0)).long())
+        #     src_mask = Variable(torch.ones(1, 1, self.args.seq_length))#一个 一行60列的矩阵
         #     res = greedy_decode(self.model, src, src_mask, max_len=self.args.seq_length, start_symbol=3)#max_len为输出的语句长度
         #
         #
