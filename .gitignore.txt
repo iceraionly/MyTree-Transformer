@@ -1,0 +1,4 @@
+/__pycache__/
+/train_model/
+/.idea/
+/data/

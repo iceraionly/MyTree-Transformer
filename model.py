@@ -167,9 +167,9 @@ def attention(query, key, value, mask=None, dropout=None,group_prob=None):
              / math.sqrt(d_k)
     if mask is not None:
         seq_len = query.size()[-2]
-        # b = torch.from_numpy(np.diag(np.ones(seq_len, dtype=np.int32), 0)).cuda()
-        b = torch.from_numpy(np.diag(np.ones(seq_len, dtype=np.int32), 0))
-        scores = scores.masked_fill((mask | b.bool()) == 0, -1e9)
+        b = torch.from_numpy(np.diag(np.ones(seq_len, dtype=np.int32), 0)).cuda()
+        # b = torch.from_numpy(np.diag(np.ones(seq_len, dtype=np.int32), 0))
+        scores = scores.masked_fill((mask.long() | b.bool()) == 0, -1e9)
 
     if group_prob is not None:
         p_attn = F.softmax(scores, dim=-1)
@@ -233,23 +233,23 @@ class GroupAttention(nn.Module):
         batch_size, seq_len = context.size()[:2]
         context = self.norm(context)
 
-        # a = torch.from_numpy(np.diag(np.ones(seq_len - 1, dtype=np.int32), 1)).cuda()
-        # b = torch.from_numpy(np.diag(np.ones(seq_len, dtype=np.int32), 0)).cuda()
-        # c = torch.from_numpy(np.diag(np.ones(seq_len - 1, dtype=np.int32), -1)).cuda()
-        # tri_matrix = torch.from_numpy(np.triu(np.ones([seq_len, seq_len], dtype=np.float32), 0)).cuda()
+        a = torch.from_numpy(np.diag(np.ones(seq_len - 1, dtype=np.int32), 1)).cuda()
+        b = torch.from_numpy(np.diag(np.ones(seq_len, dtype=np.int32), 0)).cuda()
+        c = torch.from_numpy(np.diag(np.ones(seq_len - 1, dtype=np.int32), -1)).cuda()
+        tri_matrix = torch.from_numpy(np.triu(np.ones([seq_len, seq_len], dtype=np.float32), 0)).cuda()
 
         # mask = eos_mask & (a+c) | b
-        a = torch.from_numpy(np.diag(np.ones(seq_len - 1, dtype=np.int32), 1))
-        b = torch.from_numpy(np.diag(np.ones(seq_len, dtype=np.int32), 0))
-        c = torch.from_numpy(np.diag(np.ones(seq_len - 1, dtype=np.int32), -1))
-        tri_matrix = torch.from_numpy(np.triu(np.ones([seq_len, seq_len], dtype=np.float32), 0))
+        # a = torch.from_numpy(np.diag(np.ones(seq_len - 1, dtype=np.int32), 1))
+        # b = torch.from_numpy(np.diag(np.ones(seq_len, dtype=np.int32), 0))
+        # c = torch.from_numpy(np.diag(np.ones(seq_len - 1, dtype=np.int32), -1))
+        # tri_matrix = torch.from_numpy(np.triu(np.ones([seq_len, seq_len], dtype=np.float32), 0))
 
-        mask = eos_mask & (a + c).bool()
+        mask = eos_mask.long() & (a + c).bool()
 
         key = self.linear_key(context)
         query = self.linear_query(context)
 
-        scores = torch.matmul(query, key.transpose(-2, -1)) / self.d_model   #Q·K转置/d
+        scores = torch.matmul(query, key.transpose(-2, -1)) / self.d_model  #Q·K转置/d
 
         scores = scores.masked_fill(mask == 0, -1e9)
         neibor_attn = F.softmax(scores, dim=-1)

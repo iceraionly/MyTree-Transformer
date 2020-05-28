@@ -202,8 +202,8 @@ class data_utils():
 
             ll = line.get("nl").strip()
             ll = re.sub(pattern, lambda x: " " + x.group(0), ll) #解决峰驼
-            ll = re.sub(";", " ; ", ll) #保留；
-            for word in re.split(" |\(|\)|\{|\}|,|\n|\[|\]|\.",ll):
+            # ll = re.sub(";", " ; ", ll) #保留；
+            for word in re.split(" |\(|\)|\{|\}|,|\n|\[|\]|\.|\<|\>|:|\|",ll):
                 w=""
                 is_skip=False
                 for sub_words in self.tokenizer.tokenize(word):
@@ -220,12 +220,14 @@ class data_utils():
                         word_count[w] = word_count.get(w, 0) + 1
                         su_list.append(w)
             su_list = ['[CLS]'] + su_list
+            # print(su_list)
+
             su.append(su_list)
 
             ll = line.get("code").strip()
             ll = re.sub(pattern, lambda x: " " + x.group(0), ll)  # 解决峰驼
-            ll = re.sub(";", " ; ", ll)  # 保留；
-            for word in re.split(" |\(|\)|\{|\}|,|\n|\[|\]|\.",ll):
+            # ll = re.sub(";", " ; ", ll)  # 保留；
+            for word in re.split(" |\(|\)|\{|\}|,|\n|\[|\]|\.|\<|\>|:|\|",ll):
                 w = ""
                 is_skip = False
                 for sub_words in self.tokenizer.tokenize(word):
@@ -247,7 +249,7 @@ class data_utils():
             co.append(co_list)
 
         for w in word_count:
-            if word_count[w] >= 1:
+            if word_count[w] > 1:
                 self.new_vocab[w] = len(self.new_vocab)
 
         for d in co:
@@ -306,8 +308,8 @@ class data_utils():
 
         ll = text.strip()
         ll = re.sub(pattern, lambda x: " " + x.group(0), ll)  # 解决峰驼
-        ll = re.sub(";", " ; ", ll)  # 保留；
-        for word in re.split(" |\(|\)|\{|\}|,|\n|\[|\]|\.", ll):
+        # ll = re.sub(";", " ; ", ll)  # 保留；
+        for word in re.split(" |\(|\)|\{|\}|,|\n|\[|\]|\.|\<|\>|:|\|\?", ll):
 
             w = ""
             is_skip = False
@@ -321,8 +323,8 @@ class data_utils():
                 w = '[UNK]'
             if w in self.new_vocab:
                 w_list.append(self.new_vocab[w])
-            else:
-                w_list.append(self.unk_id)
+            # else:
+                # w_list.append(self.unk_id)
 
         w_list = [self.new_vocab['[CLS]']] + w_list
         indexed_tokens = w_list
